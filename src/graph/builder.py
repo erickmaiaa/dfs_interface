@@ -1,76 +1,112 @@
-import networkx as nx
+from __future__ import annotations
+
 from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import networkx as nx
 
 
-def build_graph_from_file(file_path):
+@dataclass
+class GraphData:
+    graph: nx.DiGraph
+    num_vertices: int
+    adj_list: list[list[int]]
+    vertices_by_outdegree: list[int]  # highest outdegree first
+
+    @property
+    def start_node(self) -> int:
+        return self.vertices_by_outdegree[0] if self.vertices_by_outdegree else 0
+
+
+def build_graph_from_file(file_path: str | Path) -> GraphData:
+    """Parse a directed graph file and return a GraphData instance.
+
+    File format:
+        Line 0: <num_vertices> <num_edges> [D]
+        Lines 1..N: <source> <target>
+    """
+    path = Path(file_path)
     try:
-        with open(file_path, "r") as graph_file:
-            lines = graph_file.readlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
-        print(f"Error: File not found at {file_path}")
-        raise
+        raise FileNotFoundError(f"Graph file not found: {path}")
 
     if not lines:
         raise ValueError("Graph file is empty.")
 
-    try:
-        parts = lines[0].split()
-        if len(parts) < 2:
-            raise ValueError(
-                "First line must contain at least num_vertices and num_edges.")
-        num_vertices, num_edges = map(int, parts[:2])
-    except (ValueError, IndexError):
-        raise ValueError(
-            "Invalid first line format. Expected at least: num_vertices num_edges")
+    num_vertices, num_edges = _parse_header(lines[0])
 
     if num_vertices <= 0:
-        print("Error: Graph must have at least one vertex.")
-        exit()
+        raise ValueError("Graph must have at least one vertex.")
 
-    adj_list = [[] for _ in range(num_vertices)]
-    edges = []
-    source_vertices = []
+    edges, outdegree_counts = _parse_edges(lines[1:], num_edges, num_vertices)
 
-    if len(lines) < num_edges + 1:
-        print(
-            f"Warning: File contains fewer lines ({len(lines)-1}) than expected edges ({num_edges}). Processing available lines.")
-        num_edges = len(lines) - 1
-
-    if num_edges > 0:
-        for i in range(1, num_edges + 1):
-            try:
-                line_content = lines[i].split()
-                if len(line_content) < 2:
-                    raise ValueError(
-                        f"Invalid edge format in line {i+1}. Expected: source_vertex target_vertex")
-                u, v = map(int, line_content[:2])
-                if not (0 <= u < num_vertices and 0 <= v < num_vertices):
-                    raise ValueError(
-                        f"Vertex index out of range [0, {num_vertices-1}] in edge on line {i+1}: {u} {v}")
-                edges.append((u, v))
-                adj_list[u].append(v)
-                source_vertices.append(u)
-            except ValueError as e:
-                raise ValueError(
-                    f"Invalid data on line {i+1}: {lines[i].strip()}. Original error: {e}")
+    adj_list: list[list[int]] = [[] for _ in range(num_vertices)]
+    for u, v in edges:
+        adj_list[u].append(v)
 
     graph = nx.DiGraph()
     graph.add_nodes_from(range(num_vertices))
     graph.add_edges_from(edges)
 
-    if not source_vertices:
-        highest_degree_vertex = 0
-        vertices_sorted_by_degree = list(range(num_vertices))
-    else:
-        degree_counts = Counter(source_vertices)
-        vertices_sorted_by_degree_tuples = degree_counts.most_common()
-        highest_degree_vertex = vertices_sorted_by_degree_tuples[
-            0][0] if vertices_sorted_by_degree_tuples else 0
-        vertices_sorted_by_degree = [
-            v for v, _ in vertices_sorted_by_degree_tuples]
-        all_vertices = set(range(num_vertices))
-        vertices_with_degree = set(vertices_sorted_by_degree)
-        vertices_sorted_by_degree.extend(
-            sorted(list(all_vertices - vertices_with_degree)))
+    vertices_by_outdegree = _sort_by_outdegree(outdegree_counts, num_vertices)
 
-    return graph, highest_degree_vertex, num_vertices, adj_list, vertices_sorted_by_degree
+    return GraphData(
+        graph=graph,
+        num_vertices=num_vertices,
+        adj_list=adj_list,
+        vertices_by_outdegree=vertices_by_outdegree,
+    )
+
+
+def _parse_header(line: str) -> tuple[int, int]:
+    parts = line.split()
+    if len(parts) < 2:
+        raise ValueError("First line must contain at least: num_vertices num_edges")
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        raise ValueError(f"Invalid header values: '{line.strip()}'")
+
+
+def _parse_edges(
+    edge_lines: list[str],
+    expected_count: int,
+    num_vertices: int,
+) -> tuple[list[tuple[int, int]], Counter]:
+    available = min(expected_count, len(edge_lines))
+    if available < expected_count:
+        import warnings
+        warnings.warn(
+            f"File has {available} edge lines but header declares {expected_count}. "
+            "Processing available lines.",
+            stacklevel=3,
+        )
+
+    edges: list[tuple[int, int]] = []
+    outdegree_counts: Counter = Counter()
+
+    for i, raw_line in enumerate(edge_lines[:available], start=2):
+        parts = raw_line.split()
+        if len(parts) < 2:
+            raise ValueError(f"Invalid edge format on line {i}: '{raw_line.strip()}'")
+        try:
+            u, v = int(parts[0]), int(parts[1])
+        except ValueError:
+            raise ValueError(f"Non-integer vertex on line {i}: '{raw_line.strip()}'")
+
+        if not (0 <= u < num_vertices and 0 <= v < num_vertices):
+            raise ValueError(
+                f"Vertex index out of range [0, {num_vertices - 1}] on line {i}: {u} {v}"
+            )
+
+        edges.append((u, v))
+        outdegree_counts[u] += 1
+
+    return edges, outdegree_counts
+
+
+def _sort_by_outdegree(outdegree_counts: Counter, num_vertices: int) -> list[int]:
+    """Return all vertex indices sorted by outdegree descending, ties broken by index."""
+    return sorted(range(num_vertices), key=lambda v: (-outdegree_counts.get(v, 0), v))

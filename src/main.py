@@ -1,43 +1,60 @@
 import argparse
+import logging
+import sys
+
 from src.graph.builder import build_graph_from_file
 from src.algorithms.dfs import perform_dfs
 from src.visualization.animator import DfsVisualizer
 
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+log = logging.getLogger(__name__)
 
-def main():
+
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Perform and animate Depth First Search on a graph from a file.")
-    parser.add_argument("file_path", nargs='?', default='./data/G1.txt',
-                        help="Path to the graph file (default: ./data/G1.txt).")
-    parser.add_argument("-p", "--pause", type=float, default=1.0,
-                        help="Pause duration in seconds between animation steps.")
+        description="Perform and animate Depth-First Search on a directed graph."
+    )
+    parser.add_argument(
+        "file_path",
+        nargs="?",
+        default="./data/G1.txt",
+        help="Path to the graph file (default: ./data/G1.txt).",
+    )
+    parser.add_argument(
+        "-p", "--pause",
+        type=float,
+        default=1.0,
+        help="Pause duration in seconds between animation steps (default: 1.0).",
+    )
     args = parser.parse_args()
 
     try:
-        graph, start_node_for_anim, num_vertices, adj_list, vertices_by_degree = build_graph_from_file(
-            args.file_path)
+        data = build_graph_from_file(args.file_path)
+    except (FileNotFoundError, ValueError) as exc:
+        log.error("Failed to load graph: %s", exc)
+        sys.exit(1)
 
-        print(
-            f"Graph built: {num_vertices} vertices, {graph.number_of_edges()} edges.")
-        print(
-            f"Highest degree vertex (for animation start): {start_node_for_anim}")
+    log.info(
+        "Graph loaded: %d vertices, %d edges.",
+        data.num_vertices,
+        data.graph.number_of_edges(),
+    )
+    log.info("DFS start vertex (highest outdegree): %d", data.start_node)
 
-        edge_types, d_times, f_times = perform_dfs(
-            adj_list, vertices_by_degree, num_vertices)
+    edge_types, d_times, f_times = perform_dfs(
+        data.adj_list, data.vertices_by_outdegree, data.num_vertices
+    )
 
-        print("DFS complete. Calculated edge types, discovery and finish times.")
-        print(f"Discovery Times (d): {d_times}")
-        print(f"Finish Times (f): {f_times}")
+    log.info("DFS complete.")
+    log.info("Discovery times (d): %s", d_times)
+    log.info("Finish times    (f): %s", f_times)
 
-        print("Starting animation...")
-        visualizer = DfsVisualizer(
-            graph, start_node_for_anim, edge_types, d_times, f_times, pause_duration=args.pause)
-        visualizer.run_animation()
-
-    except (FileNotFoundError, ValueError, SystemExit) as e:
-        print(f"An error occurred: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+    log.info("Starting animation...")
+    visualizer = DfsVisualizer(
+        data.graph, data.start_node, edge_types, d_times, f_times,
+        pause_duration=args.pause,
+    )
+    visualizer.run_animation()
 
 
 if __name__ == "__main__":

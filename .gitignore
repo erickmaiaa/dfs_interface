@@ -1,8 +1,22 @@
-Include
-Lib
-Scripts
-share
-pyvenv.cfg
-__pycache__
-__init__.py
-__init__.pyc
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
